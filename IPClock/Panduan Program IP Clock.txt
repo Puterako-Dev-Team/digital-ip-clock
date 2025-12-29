@@ -1,0 +1,38 @@
+📘 Digital IP Clock Sync Tool
+
+Aplikasi Digital IP Clock By Puterako adalah program untuk melakukan sinkronisasi waktu ke perangkat jam digital melalui jaringan TCP/IP.
+Aplikasi ini otomatis menyesuaikan waktu sesuai jam komputer, dan mendukung banyak perangkat (multi-IP).
+
+✨ Fitur Utama
+
+- Sinkronisasi waktu real-time ke jam digital (via TCP/IP).
+- Mendukung banyak perangkat sekaligus.
+- Tambah/Hapus daftar IP dengan mudah.
+- Auto-startup: aplikasi otomatis berjalan setiap kali komputer dinyalakan.
+- Terdapat indikator Connected dan Timeout pada device yang terkoneksi
+
+📦 Instalasi
+
+- Download dan ekstrak file.
+- Simpan di folder komputer.
+- Jalankan .exe untuk pertama kali.
+
+📦 SETUP DEVICE
+1. Masuk ke alamat IP Device
+2. Pastikan Alamat IP dari Device dengan IP di PC yang menjalankan program (Pastikan satu Segment).
+3. Pilih TCP Server dengan Port Device 1001 (default program)
+4. Save Settingan Device
+
+🚀 Cara Penggunaan
+
+1. Buka aplikasi Digital IP Clock.
+2. Masukkan IP Device dan Port (default 1001).
+3. Klik Tambah IP → IP akan tersimpan permanen.
+4. Pilih IP di listbox → klik Hapus IP jika tidak dipakai lagi.
+5. Log aktivitas akan tampil di panel bawah.
+6. Status Connected dan Timeout akan tampil right panel
+
+📦 Langkah Langkah Install Services (Auto Start Up)
+
+1. Jalankan services_ipclock.bat pastikan Run as Administrator
+2. Service auto terdaftar di Services bernama IPClockService

@@ -7,7 +7,9 @@ import pickle
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
-
+import ntplib
+from tkinter import messagebox
+from datetime import datetime, timezone
 
 def resource_path(filename):
     if getattr(sys, 'frozen', False):
@@ -22,59 +24,115 @@ IP_LIST_FILE = "ip_list.pkl"
 COLOR_RED = "#D9252A"
 COLOR_GREEN = "#8CC63F"
 COLOR_WHITE = "#FFFFFF"
+COLOR_BLACK = "#000000"
+COLOR_PASTEL = "#FCB53B"
 
 class NP301SyncTool:
     def __init__(self, root):
         self.root = root
+        days_left = self.check_trial_period()
         icon_path = resource_path("assets/favicon.ico")
         if os.path.exists(icon_path):
             self.root.iconbitmap(icon_path)
         self.root.title("Digital IP Clock By Puterako")
-        self.root.geometry("600x450")
+        self.root.geometry("1000x550")
         self.root.configure(bg=COLOR_WHITE)
+        self.root.resizable(True, True)
+        
+        # PERBAIKAN 1: Tambah cleanup handler
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # ===== IP List =====
         self.ip_list = self.load_ip_list()
-        self.port = 1001
+        self.executor = ThreadPoolExecutor(max_workers=50)
 
-        # ===== Current Time Display =====
-        self.time_label = tk.Label(root, text="", font=("Consolas", 28, "bold"),
-                                   fg=COLOR_RED, bg=COLOR_WHITE)
-        self.time_label.pack(pady=10)
+        # ===== Frame Atas: Jam & Trial =====
+        top_frame = tk.Frame(root, bg=COLOR_WHITE, height=100)
+        top_frame.pack(fill=tk.X, pady=(10,0))
+        top_frame.pack_propagate(False)
+
+        self.time_label = tk.Label(top_frame, text="", font=("Consolas", 36, "bold"),
+                                   fg=COLOR_BLACK, bg=COLOR_WHITE)
+        self.time_label.pack(pady=(10,0), anchor="center", expand=True)
         self.update_clock()
+        self.trial_label = tk.Label(top_frame, text=f"Sisa masa trial: {days_left} hari",
+                                   font=("Arial", 11, "bold"), fg=COLOR_RED, bg=COLOR_WHITE)
+        self.trial_label.pack(pady=(0,10), anchor="center", expand=True)
 
-        # ===== IP & Port Input =====
-        input_frame = tk.Frame(root, bg=COLOR_WHITE)
-        input_frame.pack(pady=10)
+        # ===== Frame Tengah =====
+        middle_frame = tk.Frame(root, bg=COLOR_WHITE)
+        middle_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=(10,0))
+
+        # --- Left VStack ---
+        left_vstack = tk.Frame(middle_frame, bg=COLOR_WHITE, width=500)
+        left_vstack.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
+        left_vstack.pack_propagate(False)
+
+        input_labelframe = tk.LabelFrame(left_vstack, text="Tambah / Hapus Device",
+                                         font=("Arial", 10, "bold"), fg=COLOR_BLACK, bg=COLOR_WHITE)
+        input_labelframe.pack(fill=tk.X, padx=5, pady=(5,2))
+
+        input_frame = tk.Frame(input_labelframe, bg=COLOR_WHITE)
+        input_frame.pack(fill=tk.X, padx=5, pady=5)
 
         tk.Label(input_frame, text="IP Device:", font=("Arial", 12, "bold"),
                  fg=COLOR_GREEN, bg=COLOR_WHITE).pack(side=tk.LEFT)
-        self.ip_entry = tk.Entry(input_frame, font=("Arial", 14), width=15, fg=COLOR_RED)
-        self.ip_entry.pack(side=tk.LEFT, padx=5)
+        self.ip_entry = tk.Entry(input_frame, font=("Arial", 14), width=12, fg=COLOR_BLACK)
+        self.ip_entry.pack(side=tk.LEFT, padx=3)
 
         tk.Label(input_frame, text="Port:", font=("Arial", 12, "bold"),
                  fg=COLOR_GREEN, bg=COLOR_WHITE).pack(side=tk.LEFT)
-        self.port_entry = tk.Entry(input_frame, font=("Arial", 14), width=6, fg=COLOR_RED)
-        self.port_entry.pack(side=tk.LEFT, padx=5)
-        self.port_entry.insert(0, str(self.port))
+        self.port_entry = tk.Entry(input_frame, font=("Arial", 14), width=5, fg=COLOR_BLACK)
+        self.port_entry.pack(side=tk.LEFT, padx=3)
+        self.port_entry.insert(0, str(1001))
 
-        tk.Button(input_frame, text="Tambah IP", command=self.add_ip,
-                  bg=COLOR_GREEN, fg="white", width=10).pack(side=tk.LEFT, padx=5)
-        tk.Button(input_frame, text="Hapus IP", command=self.delete_ip,
-                  bg=COLOR_RED, fg="white", width=10).pack(side=tk.LEFT, padx=5)
+        btn_add = tk.Button(input_frame, text="Tambah", command=self.add_ip,
+                            bg=COLOR_GREEN, fg="white", width=8, font=("Arial", 10))
+        btn_add.pack(side=tk.LEFT, padx=3)
 
-        # ===== Listbox IP =====
-        self.ip_listbox = tk.Listbox(root, font=("Consolas", 12), height=5,
-                                     selectmode=tk.SINGLE, bg=COLOR_WHITE)
-        self.ip_listbox.pack(fill=tk.X, padx=10)
+        btn_del = tk.Button(input_frame, text="Hapus", command=self.delete_ip,
+                            bg=COLOR_RED, fg="white", width=8, font=("Arial", 10))
+        btn_del.pack(side=tk.LEFT, padx=3)
+
+        ip_labelframe = tk.LabelFrame(left_vstack, text="Daftar IP Tersimpan",
+                                      font=("Arial", 10, "bold"), fg=COLOR_BLACK, bg=COLOR_WHITE)
+        ip_labelframe.pack(fill=tk.X, padx=5, pady=(2,2))
+
+        self.ip_listbox = tk.Listbox(ip_labelframe, font=("Consolas", 11), height=5,
+                                     selectmode=tk.SINGLE, bg=COLOR_WHITE, width=30)
+        self.ip_listbox.pack(fill=tk.X, padx=5, pady=5)
+
+        log_labelframe = tk.LabelFrame(left_vstack, text="Log Aktivitas",
+                                       font=("Arial", 10, "bold"), fg=COLOR_BLACK, bg=COLOR_WHITE)
+        log_labelframe.pack(fill=tk.BOTH, padx=5, pady=(2,5), expand=True)
+
+        self.log_text = tk.Text(log_labelframe, height=8, bg=COLOR_WHITE,
+                                fg=COLOR_BLACK, font=("Courier", 9), width=40)
+        self.log_text.pack(fill=tk.BOTH, padx=5, pady=5, expand=True)
+
+        # --- Right Panel ---
+        right_panel = tk.Frame(middle_frame, bg=COLOR_WHITE, width=520)
+        right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        right_panel.pack_propagate(False)
+
+        status_labelframe = tk.LabelFrame(right_panel, text="Status IP Device",
+                                          font=("Arial", 10, "bold"), fg=COLOR_BLACK, bg=COLOR_WHITE)
+        status_labelframe.pack(fill=tk.BOTH, padx=5, pady=(5,5), expand=True)
+
+        self.status_frame = tk.Frame(status_labelframe, bg=COLOR_WHITE)
+        self.status_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+        self.status_buttons = {}
+
+        # Init data
         self.refresh_ip_listbox()
-
-        # ===== Log Area =====
-        self.log_text = tk.Text(root, height=12, bg=COLOR_WHITE, fg="black", font=("Courier", 9))
-        self.log_text.pack(fill=tk.BOTH, padx=10, pady=10)
-
         self.live_running = False
         self.toggle_live()
+
+    # PERBAIKAN 2: Tambah cleanup method
+    def on_closing(self):
+        """Cleanup sebelum tutup aplikasi"""
+        self.live_running = False
+        self.executor.shutdown(wait=False)
+        self.root.destroy()
 
     def load_ip_list(self):
         local_file = os.path.join(os.getcwd(), IP_LIST_FILE)
@@ -84,22 +142,14 @@ class NP301SyncTool:
                     return pickle.load(f)
             except Exception:
                 return ["192.168.2.246"]
-        ip_file_path = resource_path(IP_LIST_FILE)
-        if os.path.exists(ip_file_path):
-            try:
-                with open(ip_file_path, "rb") as f:
-                    return pickle.load(f)
-            except Exception:
-                return ["192.168.2.246"]
         return ["192.168.2.246"]
 
     def save_ip_list(self):
-        local_file = os.path.join(os.getcwd(), IP_LIST_FILE)
-        with open(local_file, "wb") as f:
+        with open(IP_LIST_FILE, "wb") as f:
             pickle.dump(self.ip_list, f)
 
     def update_clock(self):
-        now = datetime.datetime.now().strftime("%H:%M:%S")
+        now = datetime.now().strftime("%H:%M:%S")
         self.time_label.config(text=now)
         self.root.after(1000, self.update_clock)
 
@@ -107,24 +157,65 @@ class NP301SyncTool:
         self.root.after(0, lambda: self._append_log(msg))
 
     def _append_log(self, msg):
-        now = datetime.datetime.now().strftime("%H:%M:%S")
+        now = datetime.now().strftime("%H:%M:%S")
         self.log_text.insert(tk.END, f"[{now}] : {msg}\n")
+        lines = self.log_text.get("1.0", tk.END).splitlines()
+        if len(lines) > 500:
+            self.log_text.delete("1.0", f"{len(lines)-500}.0")
         self.log_text.see(tk.END)
 
     def refresh_ip_listbox(self):
         self.ip_listbox.delete(0, tk.END)
         for ip in self.ip_list:
             self.ip_listbox.insert(tk.END, ip)
+        self.refresh_status_panel()
+
+    def refresh_status_panel(self):
+        max_cols = 7
+        # Hapus label untuk IP yang sudah tidak ada di list
+        ips_to_remove = [ip for ip in self.status_buttons if ip not in self.ip_list]
+        for ip in ips_to_remove:
+            self.status_buttons[ip].destroy()
+            del self.status_buttons[ip]
+        
+        # Buat atau update posisi label untuk IP yang ada
+        for idx, ip in enumerate(self.ip_list):
+            if ip not in self.status_buttons:
+                short_ip = ip.split('.')[-1]
+                lbl = tk.Label(self.status_frame, text=short_ip, width=6, height=2,
+                               bg="grey", fg="white", font=("Consolas", 12, "bold"),
+                               relief=tk.RIDGE, borderwidth=1)
+                self.status_buttons[ip] = lbl
+            # Update posisi grid untuk semua label
+            self.status_buttons[ip].grid(row=idx // max_cols, column=idx % max_cols, padx=4, pady=4)
+
+    # PERBAIKAN 3: Thread-safe status update
+    def set_status(self, ip, status):
+        self.root.after(0, lambda: self._set_status_impl(ip, status))
+
+    def _set_status_impl(self, ip, status):
+        lbl = self.status_buttons.get(ip)
+        if not lbl: return
+        short_ip = ip.split('.')[-1]
+        if status == "C":
+            lbl.config(bg=COLOR_GREEN, text=f"{short_ip} C", fg="white")
+        elif status == "T":
+            lbl.config(bg=COLOR_PASTEL, text=f"{short_ip} T", fg="white")
+        else:
+            lbl.config(bg="grey", text=short_ip, fg="white")
 
     def add_ip(self):
         ip = self.ip_entry.get().strip()
-        if ip and ip not in self.ip_list:
-            self.ip_list.append(ip)
-            self.save_ip_list()
-            self.refresh_ip_listbox()
-            self.log(f"IP {ip} ditambahkan.")
-        else:
-            self.log("IP sudah ada atau kosong.")
+        if not ip:
+            self.log("IP kosong.")
+            return
+        if ip in self.ip_list:
+            self.log("IP sudah ada.")
+            return
+        self.ip_list.append(ip)
+        self.save_ip_list()
+        self.refresh_ip_listbox()
+        self.log(f"IP {ip} ditambahkan.")
 
     def delete_ip(self):
         selected = self.ip_listbox.curselection()
@@ -138,10 +229,14 @@ class NP301SyncTool:
             self.log("Pilih IP yang mau dihapus di list.")
 
     def get_port(self):
-        return int(self.port_entry.get().strip())
+        try:
+            return int(self.port_entry.get().strip())
+        except ValueError:
+            self.log("Port tidak valid, gunakan angka.")
+            return 1001
 
     def build_time_string(self):
-        now = datetime.datetime.now()
+        now = datetime.now()
         if now.second % 2 == 0:
             timestr = now.strftime("%H:%M:%S")
         else:
@@ -154,42 +249,28 @@ class NP301SyncTool:
                 s.settimeout(0.3)
                 s.connect((ip, port))
                 s.sendall(msg.encode("latin1"))
+            self.set_status(ip, "C")
         except Exception:
-            pass
+            self.set_status(ip, "T")
 
     def live_worker(self):
-        executor = ThreadPoolExecutor(max_workers=min(50, len(self.ip_list) + 10))
-        
-        # Sinkronisasi awal ke detik genap
-        while datetime.datetime.now().microsecond > 100000:
+        while datetime.now().microsecond > 100000:
             time.sleep(0.01)
-        
         next_tick = time.time() + 1.0
-        
         try:
             while self.live_running:
-                # Hitung waktu target berikutnya (setiap detik genap)
-                current = time.time()
-                
-                # Kirim ke semua device secara parallel (fire and forget)
                 msg = self.build_time_string()
                 port = self.get_port()
-                
                 for ip in self.ip_list:
-                    executor.submit(self.send_time_to_ip, ip, port, msg)
-                
-                # Tunggu hingga tepat 1 detik berikutnya tanpa menunggu hasil
+                    self.executor.submit(self.send_time_to_ip, ip, port, msg)
                 next_tick += 1.0
                 sleep_time = next_tick - time.time()
-                
                 if sleep_time > 0:
                     time.sleep(sleep_time)
                 else:
-                    # Jika terlambat, reset ke tick berikutnya
                     next_tick = time.time() + 1.0
-                    
-        finally:
-            executor.shutdown(wait=False)
+        except Exception as e:
+            self.log(f"Live worker error: {e}")
 
     def toggle_live(self):
         if not self.live_running:
@@ -200,7 +281,57 @@ class NP301SyncTool:
             self.live_running = False
             self.log("Live sync dihentikan")
 
+    LICENSE_FILE = "license.pkl"
+
+    def get_ntp_time(self):
+        try:
+            client = ntplib.NTPClient()
+            response = client.request('pool.ntp.org', version=3)
+            return datetime.fromtimestamp(response.tx_time, timezone.utc)
+        except Exception as e:
+            self.log(f"Gagal ambil waktu NTP: {e}")
+            return datetime.now(timezone.utc)
+
+    def check_trial_period(self):
+        path = os.path.join(os.getcwd(), self.LICENSE_FILE)
+        now = self.get_ntp_time()
+
+        if not os.path.exists(path):
+            messagebox.showerror("License Error", "File license tidak ditemukan.\nHubungi Puterako untuk aktivasi.")
+            sys.exit(0)
+
+        try:
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+                if isinstance(data, tuple):
+                    start_time, trial_days = data
+                else:
+                    start_time = data
+                    trial_days = 7  # fallback default
+        except Exception:
+            messagebox.showerror("License Error", "File license corrupt.\nHubungi Puterako untuk aktivasi.")
+            sys.exit(0)
+
+        elapsed = (now - start_time).days if isinstance(start_time, datetime) else (now.date() - start_time).days
+        days_left = trial_days - elapsed
+        if days_left <= 0:
+            messagebox.showerror("Trial Expired", "Masa trial sudah habis.\nHubungi Puterako untuk aktivasi.")
+            sys.exit(0)
+        return days_left
+
+def check_license_before_tk():
+    path = os.path.join(os.getcwd(), "license.pkl")
+    try:
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+            # Validasi isi jika perlu
+    except Exception:
+        import tkinter.messagebox as msg
+        msg.showerror("License Error", "File license tidak ditemukan.\nHubungi Puterako untuk aktivasi.")
+        sys.exit(0)
+
 if __name__ == "__main__":
+    check_license_before_tk()  
     root = tk.Tk()
     app = NP301SyncTool(root)
     root.mainloop()
