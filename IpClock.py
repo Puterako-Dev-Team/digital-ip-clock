@@ -7,9 +7,8 @@ import pickle
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
-import ntplib
 from tkinter import messagebox
-from datetime import datetime, timezone
+from datetime import datetime
 
 def resource_path(filename):
     if getattr(sys, 'frozen', False):
@@ -30,7 +29,6 @@ COLOR_PASTEL = "#FCB53B"
 class NP301SyncTool:
     def __init__(self, root):
         self.root = root
-        days_left = self.check_trial_period()
         icon_path = resource_path("assets/favicon.ico")
         if os.path.exists(icon_path):
             self.root.iconbitmap(icon_path)
@@ -54,9 +52,6 @@ class NP301SyncTool:
                                    fg=COLOR_BLACK, bg=COLOR_WHITE)
         self.time_label.pack(pady=(10,0), anchor="center", expand=True)
         self.update_clock()
-        self.trial_label = tk.Label(top_frame, text=f"Sisa masa trial: {days_left} hari",
-                                   font=("Arial", 11, "bold"), fg=COLOR_RED, bg=COLOR_WHITE)
-        self.trial_label.pack(pady=(0,10), anchor="center", expand=True)
 
         # ===== Frame Tengah =====
         middle_frame = tk.Frame(root, bg=COLOR_WHITE)
@@ -281,57 +276,7 @@ class NP301SyncTool:
             self.live_running = False
             self.log("Live sync dihentikan")
 
-    LICENSE_FILE = "license.pkl"
-
-    def get_ntp_time(self):
-        try:
-            client = ntplib.NTPClient()
-            response = client.request('pool.ntp.org', version=3)
-            return datetime.fromtimestamp(response.tx_time, timezone.utc)
-        except Exception as e:
-            self.log(f"Gagal ambil waktu NTP: {e}")
-            return datetime.now(timezone.utc)
-
-    def check_trial_period(self):
-        path = os.path.join(os.getcwd(), self.LICENSE_FILE)
-        now = self.get_ntp_time()
-
-        if not os.path.exists(path):
-            messagebox.showerror("License Error", "File license tidak ditemukan.\nHubungi Puterako untuk aktivasi.")
-            sys.exit(0)
-
-        try:
-            with open(path, "rb") as f:
-                data = pickle.load(f)
-                if isinstance(data, tuple):
-                    start_time, trial_days = data
-                else:
-                    start_time = data
-                    trial_days = 7  # fallback default
-        except Exception:
-            messagebox.showerror("License Error", "File license corrupt.\nHubungi Puterako untuk aktivasi.")
-            sys.exit(0)
-
-        elapsed = (now - start_time).days if isinstance(start_time, datetime) else (now.date() - start_time).days
-        days_left = trial_days - elapsed
-        if days_left <= 0:
-            messagebox.showerror("Trial Expired", "Masa trial sudah habis.\nHubungi Puterako untuk aktivasi.")
-            sys.exit(0)
-        return days_left
-
-def check_license_before_tk():
-    path = os.path.join(os.getcwd(), "license.pkl")
-    try:
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-            # Validasi isi jika perlu
-    except Exception:
-        import tkinter.messagebox as msg
-        msg.showerror("License Error", "File license tidak ditemukan.\nHubungi Puterako untuk aktivasi.")
-        sys.exit(0)
-
 if __name__ == "__main__":
-    check_license_before_tk()  
     root = tk.Tk()
     app = NP301SyncTool(root)
     root.mainloop()
