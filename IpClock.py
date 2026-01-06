@@ -161,7 +161,8 @@ class NP301SyncTool:
 
     def refresh_ip_listbox(self):
         self.ip_listbox.delete(0, tk.END)
-        for ip in self.ip_list:
+        sorted_ips = sorted(self.ip_list, key=lambda ip: [int(x) for x in ip.split('.')])
+        for ip in sorted_ips:
             self.ip_listbox.insert(tk.END, ip)
         self.refresh_status_panel()
 
@@ -208,6 +209,8 @@ class NP301SyncTool:
             self.log("IP sudah ada.")
             return
         self.ip_list.append(ip)
+        # Sort setelah menambah IP
+        self.ip_list.sort(key=lambda ip: [int(x) for x in ip.split('.')])
         self.save_ip_list()
         self.refresh_ip_listbox()
         self.log(f"IP {ip} ditambahkan.")
