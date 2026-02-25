@@ -6,9 +6,10 @@ import time
 import pickle
 import os
 import sys
+import ntplib
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import messagebox
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def resource_path(filename):
     if getattr(sys, 'frozen', False):
@@ -26,6 +27,14 @@ COLOR_WHITE = "#FFFFFF"
 COLOR_BLACK = "#000000"
 COLOR_PASTEL = "#FCB53B"
 
+# NTP Servers
+NTP_SERVERS = [
+    "time.google.com",
+    "time.windows.com", 
+    "pool.ntp.org",
+    "time.cloudflare.com"
+]
+
 class NP301SyncTool:
     def __init__(self, root):
         self.root = root
@@ -42,6 +51,11 @@ class NP301SyncTool:
 
         self.ip_list = self.load_ip_list()
         self.executor = ThreadPoolExecutor(max_workers=50)
+        
+        # NTP offset tracking
+        self.ntp_offset = timedelta(0)  # Selisih waktu NTP vs lokal
+        self.ntp_synced = False
+        self.last_ntp_sync = None
 
         # ===== Frame Atas: Jam & Trial =====
         top_frame = tk.Frame(root, bg=COLOR_WHITE, height=100)
@@ -51,7 +65,16 @@ class NP301SyncTool:
         self.time_label = tk.Label(top_frame, text="", font=("Consolas", 36, "bold"),
                                    fg=COLOR_BLACK, bg=COLOR_WHITE)
         self.time_label.pack(pady=(10,0), anchor="center", expand=True)
+        
+        # NTP Status Label
+        self.ntp_status_label = tk.Label(top_frame, text="NTP: Belum sync", 
+                                         font=("Arial", 10), fg="grey", bg=COLOR_WHITE)
+        self.ntp_status_label.pack(anchor="center")
+        
         self.update_clock()
+        
+        # Start NTP sync in background
+        threading.Thread(target=self.ntp_sync_loop, daemon=True).start()
 
         # ===== Frame Tengah =====
         middle_frame = tk.Frame(root, bg=COLOR_WHITE)
@@ -129,6 +152,38 @@ class NP301SyncTool:
         self.executor.shutdown(wait=False)
         self.root.destroy()
 
+    def sync_ntp(self):
+        """Sync waktu dengan NTP server"""
+        client = ntplib.NTPClient()
+        for server in NTP_SERVERS:
+            try:
+                response = client.request(server, version=3, timeout=3)
+                ntp_time = datetime.fromtimestamp(response.tx_time)
+                local_time = datetime.now()
+                self.ntp_offset = ntp_time - local_time
+                self.ntp_synced = True
+                self.last_ntp_sync = datetime.now()
+                self.log(f"NTP sync OK dari {server} (offset: {self.ntp_offset.total_seconds():.3f}s)")
+                self.root.after(0, lambda s=server: self.ntp_status_label.config(
+                    text=f"NTP: {s} ✓", fg=COLOR_GREEN))
+                return True
+            except Exception as e:
+                continue
+        self.log("NTP sync gagal dari semua server")
+        self.root.after(0, lambda: self.ntp_status_label.config(
+            text="NTP: Gagal sync ✗", fg=COLOR_RED))
+        return False
+
+    def ntp_sync_loop(self):
+        """Background loop untuk sync NTP setiap 10 menit"""
+        while True:
+            self.sync_ntp()
+            time.sleep(600)  # Sync setiap 10 menit
+
+    def get_accurate_time(self):
+        """Dapatkan waktu yang sudah dikoreksi dengan NTP offset"""
+        return datetime.now() + self.ntp_offset
+
     def load_ip_list(self):
         local_file = os.path.join(os.getcwd(), IP_LIST_FILE)
         if os.path.exists(local_file):
@@ -144,7 +199,7 @@ class NP301SyncTool:
             pickle.dump(self.ip_list, f)
 
     def update_clock(self):
-        now = datetime.now().strftime("%H:%M:%S")
+        now = self.get_accurate_time().strftime("%H:%M:%S")
         self.time_label.config(text=now)
         self.root.after(1000, self.update_clock)
 
@@ -234,7 +289,7 @@ class NP301SyncTool:
             return 1001
 
     def build_time_string(self):
-        now = datetime.now()
+        now = self.get_accurate_time()
         if now.second % 2 == 0:
             timestr = now.strftime("%H:%M:%S")
         else:
