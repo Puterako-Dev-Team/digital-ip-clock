@@ -9,7 +9,8 @@ import sys
 import ntplib
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import messagebox
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 def resource_path(filename):
     if getattr(sys, 'frozen', False):
@@ -51,6 +52,11 @@ class NP301SyncTool:
 
         self.ip_list = self.load_ip_list()
         self.executor = ThreadPoolExecutor(max_workers=50)
+        # Timezone OS
+        self.local_tz = datetime.now().astimezone().tzinfo
+
+        # Simpan waktu UTC dari NTP
+        self.ntp_utc_time = None
         
         # NTP offset tracking
         self.ntp_offset = timedelta(0)  # Selisih waktu NTP vs lokal
@@ -70,6 +76,9 @@ class NP301SyncTool:
         self.ntp_status_label = tk.Label(top_frame, text="NTP: Belum sync", 
                                          font=("Arial", 10), fg="grey", bg=COLOR_WHITE)
         self.ntp_status_label.pack(anchor="center")
+        self.tz_label = tk.Label(top_frame, text="", 
+                                font=("Arial", 10), fg="grey", bg=COLOR_WHITE)
+        self.tz_label.pack(anchor="center", pady=(0,10))
         
         self.update_clock()
         
@@ -153,22 +162,29 @@ class NP301SyncTool:
         self.root.destroy()
 
     def sync_ntp(self):
-        """Sync waktu dengan NTP server"""
+        """Sync waktu dengan NTP server (UTC aware)"""
         client = ntplib.NTPClient()
         for server in NTP_SERVERS:
             try:
                 response = client.request(server, version=3, timeout=3)
-                ntp_time = datetime.fromtimestamp(response.tx_time)
-                local_time = datetime.now()
-                self.ntp_offset = ntp_time - local_time
+
+                # Ambil UTC timezone-aware
+                self.ntp_utc_time = datetime.fromtimestamp(
+                    response.tx_time, tz=timezone.utc
+                )
+
                 self.ntp_synced = True
                 self.last_ntp_sync = datetime.now()
-                self.log(f"NTP sync OK dari {server} (offset: {self.ntp_offset.total_seconds():.3f}s)")
+
+                self.log(f"NTP sync OK dari {server}")
                 self.root.after(0, lambda s=server: self.ntp_status_label.config(
                     text=f"NTP: {s} ✓", fg=COLOR_GREEN))
+
                 return True
-            except Exception as e:
+
+            except Exception:
                 continue
+
         self.log("NTP sync gagal dari semua server")
         self.root.after(0, lambda: self.ntp_status_label.config(
             text="NTP: Gagal sync ✗", fg=COLOR_RED))
@@ -181,8 +197,19 @@ class NP301SyncTool:
             time.sleep(600)  # Sync setiap 10 menit
 
     def get_accurate_time(self):
-        """Dapatkan waktu yang sudah dikoreksi dengan NTP offset"""
-        return datetime.now() + self.ntp_offset
+        """Ambil waktu dari NTP UTC lalu convert ke timezone OS"""
+        if self.ntp_utc_time is None:
+            return datetime.now().astimezone()
+
+        # Hitung selisih sejak terakhir sync
+        elapsed = datetime.now(timezone.utc) - self.ntp_utc_time
+
+        current_utc = self.ntp_utc_time + elapsed
+
+        # Convert ke timezone OS
+        local_time = current_utc.astimezone()
+
+        return local_time
 
     def load_ip_list(self):
         local_file = os.path.join(os.getcwd(), IP_LIST_FILE)
@@ -199,8 +226,13 @@ class NP301SyncTool:
             pickle.dump(self.ip_list, f)
 
     def update_clock(self):
-        now = self.get_accurate_time().strftime("%H:%M:%S")
-        self.time_label.config(text=now)
+        now = self.get_accurate_time()
+        self.time_label.config(text=now.strftime("%H:%M:%S"))
+
+        # Update timezone info
+        tz_name = now.tzname()
+        self.tz_label.config(text=f"Timezone: {tz_name}")
+
         self.root.after(1000, self.update_clock)
 
     def log(self, msg):
